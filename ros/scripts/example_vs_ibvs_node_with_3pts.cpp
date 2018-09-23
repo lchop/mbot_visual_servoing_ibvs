@@ -1,7 +1,7 @@
 //
 // Created by lchopot on 28-06-2018.
 //
-#include <VS_IBVS_node/vs_ibvs_node.h>
+#include <VS_IBVS_node/vs_ibvs_node_morepts.h>
 
 #undef DEBUG
 #define NAN_ALLOWED_RATIO 0.25 //if in vector you have more than 25% you dont take depth value
