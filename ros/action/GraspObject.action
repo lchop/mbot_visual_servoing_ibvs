@@ -1,0 +1,8 @@
+#Goal definition
+string class_name  # Specify which object to grasp
+---
+# Define the result
+float64 error_desired
+---
+# Define a feedback message
+float64 error_current

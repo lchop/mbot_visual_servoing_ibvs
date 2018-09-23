@@ -1,0 +1,41 @@
+#Topic that are used:
+CamInfo_Topic: "/gripper_camera/camera_info"
+RgbImage_Topic: "/gripper_camera/image_raw/compressed"
+#CamInfo_Topic: "/gripper_camera/color/camera_info"
+#RgbImage_Topic: "/gripper_camera/color/image_raw/compressed"
+DepthImage_Topic: "/gripper_camera/aligned_depth_to_color/image_raw"
+#DepthImage_Topic: "/gripper_camera/depth/image_raw"
+DetectionResultsYolo_Topic: "/gripper_darknet_ros/detections"
+#DetectionResultsYolo_Topic: "/detection_result"
+
+#Master URI has to be set for the ROS grabber image
+#MASTER_URI: "http://10.1.15.14:11311" #mbot
+#MASTER_URI: "http://10.0.2.69:11311" #harode
+MASTER_URI: "http://localhost:11311" #louis
+
+#Diplay image or not
+Display: true
+
+#Choose detection feature method, can only use one at a time
+Yolo_Center_ROI: false
+Blob_tracking: true
+
+#Parameter for the control law related to the arm use
+error_max: 0.05 #error quadratic max to stop the loop, depend on the precision you need.
+end_effector_velocities_max: 10 #set the velocities max of the end effector in the camera frame.
+depth_desired: 0.16 # depth that is desired to reach
+command_gripper: 0.25 # command to send to close the gripper
+
+#Adaptative gain value, depending on the sended velocities and low pass filter gain
+gain_for_low_value: 15
+gain_for_high_value: 0.8
+gain_slope: 30
+gain_low_pass_filter: 0.5
+
+#Filtering class from YOLO
+filter_class: true
+filter_class_name: cocacola
+
+#You can plot real time velocities curves, for debug or performance comparation
+plot: false #set true of you want to plot real time curves of the speed and position
+save: false #set true if you want to save curves
