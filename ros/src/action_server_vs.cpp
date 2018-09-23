@@ -1,14 +1,15 @@
 //
 // Created by lchopot on 28-06-2018.
 //
-#include <VS_IBVS_node/vs_ibvs_node.h>
+#include <VS_IBVS_node/action_server_vs.h>
 
 #undef DEBUG
-#define NAN_ALLOWED_RATIO 0.25 //if in vector you have more than 25% you dont take depth value
+#define NAN_ALLOWED_RATIO 0.25 //if in vector you have more than 25% nan you dont take depth value
 
 namespace VS_IBVS {
 
-        IBVS_mbot::IBVS_mbot() : cam_px(800), cam_py(800), nh_(""), pnh_("~")
+        IBVS_mbot::IBVS_mbot(std::string name) : cam_px(800), cam_py(800), nh_(""), pnh_("~"),
+                                 as_(nh_, name, boost::bind(&IBVS_mbot::actionCallback, this, _1), false), action_name_(name)
         {
             error.data = 1.0; //init error value
             //Flags
@@ -53,11 +54,15 @@ namespace VS_IBVS {
             //subscribe to events
             event_in_sub_ = pnh_.subscribe("event_in", 5, &IBVS_mbot::EventInCallBack, this);
             //publish target_vel on a topic called ibvs/target_vel
-            pub_vel = nh_.advertise<geometry_msgs::TwistStamped>("ibvs/target_vel", 1);
+            pub_vel = pnh_.advertise<geometry_msgs::TwistStamped>("ibvs/target_vel", 1);
             //publish the quadratique error of the visual servoing law
-            pub_error = nh_.advertise<std_msgs::Float64>("ibvs/error",1);
+            pub_error = pnh_.advertise<std_msgs::Float64>("ibvs/error",1);
             //publish the command to close the gripper
-            pub_gripper = nh_.advertise<std_msgs::Float64>("left_arm_gripper_joint_position_controller/command", 1, true);
+            pub_gripper = pnh_.advertise<std_msgs::Float64>("left_arm_gripper_joint_position_controller/command", 1, true);
+
+
+            // Start the action server
+            as_.start();
         }
 
         void IBVS_mbot::GrabberImageFromRos()
@@ -165,12 +170,10 @@ namespace VS_IBVS {
         void IBVS_mbot::Init_Dot_BlobTracking()
         {
             /* Initialization for blob tracking use */
-            std::string text_to_print_on_image = "Click on the 4 dots";
-
             GetCameraParameters();
             InitVispTask(vpServo::vpServoType::EYEINHAND_CAMERA, vpServo::vpServoIteractionMatrixType::MEAN,
                          vpServo::vpServoInversionType::PSEUDO_INVERSE);
-
+            std::string text_to_print_on_image = "Click on the 4 dots";
             if(!text_to_print_on_image.empty()) //check if string not empty and Display enabled
                 DisplayImage(text_to_print_on_image);
             InitTracking_Dot_BlobTracking();
@@ -398,7 +401,6 @@ namespace VS_IBVS {
         void IBVS_mbot::Init_CenterBoundingBox()
         {
             /*Initialization for the Center Bounding Box method*/
-
             GetCameraParameters();
             InitVispTask(vpServo::vpServoType::EYEINHAND_CAMERA, vpServo::vpServoIteractionMatrixType::MEAN,
                          vpServo::vpServoInversionType::PSEUDO_INVERSE);
@@ -557,7 +559,7 @@ namespace VS_IBVS {
 
         void IBVS_mbot::CreateSubscriber()
         {
-            /* Create Subscriber when synchronized launched syncCallback, except RGB subscribes in ROS grabber function v*/
+            /* Create Subscriber when synchronized launched syncCallback, except RGB subscribe in ROS grabber function v*/
 
             depth_img_sub_.subscribe(pnh_, DepthImage_Topic, 2);
             object_array_sub_.subscribe(pnh_, DetectionResultsYolo_Topic, 2);
@@ -583,7 +585,7 @@ namespace VS_IBVS {
         void IBVS_mbot::syncCallback(const sensor_msgs::ImageConstPtr &depth,
                                      const darknet_ros_py::RecognizedObjectArrayStampedConstPtr &rec)
         {
-            /* Actual callback that is behing called depth and ROI are synchronized */
+            /* Actual callback that is being called when depth and ROI are synchronized */
 
             for (const auto &obj: rec->objects.objects)
             {
@@ -637,10 +639,39 @@ namespace VS_IBVS {
             event_out_pub_.publish(e_out);
         }
 
+        void IBVS_mbot::actionCallback(const mbot_visual_servoing_imagebased::GraspObjectGoalConstPtr &goal)
+        {
+            filter_class_name_= goal_.class_name;
+            is_running_ = true;
+            GrabberImageFromRos();
+            if (Display)
+            {
+                d = new vpDisplayOpenCV;
+                d->init(I);
+            }
+            CreateSubscriber();
+            while (ros::ok())
+            {
+                if (as_.isPreemptRequested())
+                {
+                    // set the action state to preempted
+                    as_.setPreempted();
+                    success = false;
+                    break;
+                }
+                else if (success)
+                {
+                    as_.setSucceeded(result_);
+                    break;
+                }
+                else
+                    loop();
+            }
+        }
+
         void IBVS_mbot::loop()
         {
             double iter = 0;
-
             ros::Rate loop_rate(node_frequency);
             ROS_INFO("Node will run at : %lf [hz]", IBVS_mbot::node_frequency);
 
@@ -651,114 +682,133 @@ namespace VS_IBVS {
                 CreatePlot_Features_CartesianVelocities(plotter);
             }
 
-            while (ros::ok()) {
-                if (is_running_) {
-                    if (Yolo_Center_ROI)
+            if (is_running_) {
+                ROS_INFO("Node is starting");
+                if (Yolo_Center_ROI)
+                {
+                    ROS_WARN_COND(!roi_received_, "NO ROI from YOLO received");
+                    ROS_WARN_COND(!depth_image_received_, "NO depth image received");
+                    if (roi_received_ && depth_image_received_)
                     {
-                        if (roi_received_ && depth_image_received_)
-                        {
-                            Init_CenterBoundingBox();
-                            init_done = true;
-                        }
-                    }
-                    else if (Display && Blob_tracking)
-                    {
-                        Init_Dot_BlobTracking();
+                        Init_CenterBoundingBox();
                         init_done = true;
                     }
-                    else if (!Blob_tracking && !Yolo_Center_ROI)
+                }
+                else if (!Display && Blob_tracking)
+                    ROS_ERROR("Blob tracking init by clicking on image, need display to work");
+
+                else if (Display && Blob_tracking)
+                {
+                    Init_Dot_BlobTracking();
+                    init_done = true;
+                }
+                else if (!Blob_tracking && !Yolo_Center_ROI)
+                {
+                    ROS_INFO("Please select at least one method");
+                    return;
+                }
+                if (init_done) {
+                    ROS_INFO("Init done, entering command loop...");
+                    while (error.data > error_max)
                     {
-                        return;
-                    }
-                    if (init_done) {
-                        while (error.data > error_max)
-                        {
-                            g.acquire(I);
-                            if (Display)
-                                vpDisplay::display(I);
+                        g.acquire(I);
+                        if (Display)
+                            vpDisplay::display(I);
 
-                            if (Blob_tracking)
+                        if (Blob_tracking)
+                        {
+                            UpdateCurrentFeatures_Dot_Blob_Tracking();
+                            update_done =true;
+                        }
+                        else if (Yolo_Center_ROI)
+                        {
+                            if (roi_received_ && depth_image_received_)
                             {
-                                UpdateCurrentFeatures_Dot_Blob_Tracking();
-                                update_done =true;
+                                UpdateCurrentFeatures_CenterBoundingBox();
+                                update_done = true;
+                                depth_image_received_ = false;
+                                roi_received_ = false;
                             }
-                            else if (Yolo_Center_ROI)
-                            {
-                                if (roi_received_ && depth_image_received_)
-                                {
-                                    UpdateCurrentFeatures_CenterBoundingBox();
-                                    update_done = true;
-                                    depth_image_received_ = false;
-                                    roi_received_ = false;
-                                }
-                            }
-                            if (update_done)
-                            {
-                                vel = task.computeControlLaw(); // Compute the control law
+                        }
+                        if (update_done)
+                        {
+                            vel = task.computeControlLaw(); // Compute the control law
 //                                std::cout << "before tf" << vel<<std::endl;
-                                if (Display)
-                                    vpServoDisplay::display(task, cam, I);
-                                //Compute the quadratique error
-                                error.data = task.getError().sumSquare();
-                                std::cout << "\n" << "error quadratic: " << error << "\n" << std::endl;
+                            if (Display)
+                                vpServoDisplay::display(task, cam, I);
+                            //Compute the quadratique error
+                            error.data = task.getError().sumSquare();
+                            std::cout << "\n" << "error quadratic: " << error << "\n" << std::endl;
 
-                                ArmEndEffectorVelocitiesLimitation(end_effector_velocities_max, vel);
-                                vel = TransformFromVispCameraFrameToMbotCameraFrame(vel);
+                            ArmEndEffectorVelocitiesLimitation(end_effector_velocities_max, vel);
+                            vel = TransformFromVispCameraFrameToMbotCameraFrame(vel);
 //                                std::cout << "after tf:"<< vel <<std::endl;
-                                if (!depth_error)
-                                    ApplyVelocitiesInMsgAndPublish(vel, "left_arm_camera_link");
+                            if (!depth_error)
+                                ApplyVelocitiesInMsgAndPublish(vel, "left_arm_camera_link");
 
-                                publish_error();
+                            publish_error();
 
-                                if (Display && plot)
-                                {
-                                    plotter.plot(0, iter, task.getError());
-                                    plotter.plot(1, iter, vel);
-                                }
-
-                                update_done = false;
-                                iter++;
-
-                                if (Display)
-                                    vpDisplay::flush(I);
-
-                                if (Display && vpDisplay::getClick(I, false))
-                                {
-                                    task.print();
-                                    return;
-                                }// A click in the viewer to exit
-
-                                loop_rate.sleep();
-                            }
-                            else if (Yolo_Center_ROI && !roi_received_)
+                            if (Display && plot)
                             {
-                                if (Display)
-                                    vpDisplay::flush(I);
-                                loop_rate.sleep();
-                            }
-                            else if (Yolo_Center_ROI && !depth_image_received_)
-                            {
-                                if (Display)
-                                    vpDisplay::flush(I);
-                                loop_rate.sleep();
+                                plotter.plot(0, iter, task.getError());
+                                plotter.plot(1, iter, vel);
                             }
 
+                            feedback_.error_current = error.data;
+                            as_.publishFeedback(feedback_);
+                            update_done = false;
+                            iter++;
+
+                            //if action client request a stop
+                            if (as_.isPreemptRequested())
+                            {
+                                // set the action state to preempted
+                                as_.setPreempted();
+                                success =false;
+                                break;
+                            }
+
+                            if (Display)
+                                vpDisplay::flush(I);
+
+                            if (Display && vpDisplay::getClick(I, false))
+                            {
+                                task.print();
+                                return;
+                            }// A click in the viewer to exit
+
+                            loop_rate.sleep();
                         }
-                        PublishGripperCommand();
-                        task.print();
-                        task.kill();
-                        ros::spinOnce();
-                        if (plot && Display)
+                        else if (Yolo_Center_ROI && !roi_received_)
                         {
-                            if (save)
-                            {
-                                plotter.saveData(0, "./plot_saved/error.dat");
-                                plotter.saveData(1, "./plot_saved/vc.dat");
-                            }
-                            vpDisplay::getClick(plotter.I);
+                            if (Display)
+                                vpDisplay::flush(I);
+                            loop_rate.sleep();
                         }
-                        return;
+                        else if (Yolo_Center_ROI && !depth_image_received_)
+                        {
+                            if (Display)
+                                vpDisplay::flush(I);
+                            loop_rate.sleep();
+                        }
+
                     }
+                    success = true;
+
+                    PublishGripperCommand();
+                    task.print();
+                    task.kill();
+                    ros::spinOnce();
+                    if (plot && Display)
+                    {
+                        if (save)
+                        {
+                            plotter.saveData(0, "./plot_saved/error.dat");
+                            plotter.saveData(1, "./plot_saved/vc.dat");
+                        }
+                        vpDisplay::getClick(plotter.I);
+                    }
+                    return;
                 }
             }
         }
@@ -768,13 +818,11 @@ namespace VS_IBVS {
 int main(int argc, char **argv)
 {
     ros::init(argc, argv, "ibvs_node");
+    std::string name = "grasp_object";
 
-    VS_IBVS::IBVS_mbot mbot_ibvs;
-    ROS_INFO("Node initialized");
-    mbot_ibvs.GrabberImageFromRos();
-    if (mbot_ibvs.Display)
-        vpDisplayOpenCV d(mbot_ibvs.I);
+    VS_IBVS::IBVS_mbot mbot_ibvs(name);
 
-    mbot_ibvs.loop();
-    ros::shutdown();
+
+    while (ros::ok())
+        ros::spinOnce();
 }

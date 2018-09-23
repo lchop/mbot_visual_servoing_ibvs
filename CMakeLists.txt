@@ -84,12 +84,15 @@ include_directories(
 
 
 ### EXECUTABLES
-add_executable(vs_ibvs_node ros/src/vs_ibvs_node.cpp)
-target_link_libraries(vs_ibvs_node ${catkin_LIBRARIES} ${visp_ros_LIBRARIES} ${realsense2_LIBRARY} ${OpenCV_LIBRARIES})
-add_dependencies(vs_ibvs_node ${mbot_visual_servoing_imagebased_EXPORTED_TARGETS})
+add_executable(vs_ibvs_node_event ros/src/vs_ibvs_node_event.cpp)
+target_link_libraries(vs_ibvs_node_event ${catkin_LIBRARIES} ${visp_ros_LIBRARIES} ${realsense2_LIBRARY} ${OpenCV_LIBRARIES})
+add_dependencies(vs_ibvs_node_event ${mbot_visual_servoing_imagebased_EXPORTED_TARGETS})
 
 add_executable(action_client_vs ros/src/action_client_vs.cpp)
 target_link_libraries(action_client_vs ${catkin_LIBRARIES} ${visp_ros_LIBRARIES} ${realsense2_LIBRARY} ${OpenCV_LIBRARIES})
 add_dependencies(action_client_vs ${mbot_visual_servoing_imagebased_EXPORTED_TARGETS})
 
+add_executable(action_server_vs ros/src/action_server_vs.cpp)
+target_link_libraries(action_server_vs ${catkin_LIBRARIES} ${visp_ros_LIBRARIES} ${realsense2_LIBRARY} ${OpenCV_LIBRARIES})
+add_dependencies(action_server_vs ${mbot_visual_servoing_imagebased_EXPORTED_TARGETS})
 
